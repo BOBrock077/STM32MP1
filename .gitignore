@@ -1,0 +1,18 @@
+# --- 超大檔 / 二進位 image（超過 GitHub 100MB 限制，不該入版控）---
+FLASH-stm32mp1-openstlinux-*.tar.gz
+*.tar.gz
+
+# --- 第三方可攜工具 ---
+MobaXterm_Portable_v26.3/
+
+# --- Rust 編譯產物 ---
+mp1gui/target/
+mp1gui/mp1gui-arm
+mp1gui/build.log
+
+# --- Claude Code 本機設定 ---
+.claude/
+
+# --- 其他暫存 ---
+*.swp
+Thumbs.db

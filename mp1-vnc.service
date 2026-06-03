@@ -1,0 +1,16 @@
+[Unit]
+Description=MP1 VNC desktop on :1 (openbox + ST demo)
+After=network.target weston.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Environment=HOME=/home/root
+Environment=USER=root
+ExecStartPre=-/bin/sh -c "mkdir -p /run/user/0; chmod 700 /run/user/0; rm -f /tmp/.X11-unix/X1 /tmp/.X1-lock /home/root/.vnc/*.pid"
+ExecStart=/usr/bin/vncserver :1 -geometry 1280x800 -SecurityTypes VncAuth
+ExecStop=/usr/bin/vncserver -kill :1
+
+[Install]
+WantedBy=multi-user.target

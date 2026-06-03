@@ -1,0 +1,52 @@
+import { Button, VerticalBox, HorizontalBox, GroupBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "MP1 Rust GUI";
+    preferred-width: 480px;
+    preferred-height: 320px;
+    background: #1e1e2e;
+
+    in property <string> uptime: "-";
+    in property <string> mem: "-";
+    in property <string> load: "-";
+    in property <int> elapsed: 0;
+    in-out property <int> counter: 0;
+    callback inc();
+
+    VerticalBox {
+        padding: 14px;
+        spacing: 8px;
+
+        Text {
+            text: "STM32MP1  -  Rust + Slint";
+            font-size: 24px;
+            color: #ffffff;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: "running " + root.elapsed + " s";
+            font-size: 14px;
+            color: #ffffff;
+            horizontal-alignment: center;
+        }
+
+        GroupBox {
+            title: "Board status (live)";
+            VerticalBox {
+                spacing: 4px;
+                Text { text: "Uptime : " + root.uptime; color: #ffffff; font-size: 16px; }
+                Text { text: "Memory : " + root.mem; color: #ffffff; font-size: 16px; }
+                Text { text: "Load   : " + root.load; color: #ffffff; font-size: 16px; }
+            }
+        }
+
+        HorizontalBox {
+            alignment: center;
+            Button {
+                text: "Click me  +1   (count: " + root.counter + ")";
+                clicked => { root.inc(); }
+            }
+        }
+    }
+}

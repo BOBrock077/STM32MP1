@@ -1,0 +1,22 @@
+[package]
+name = "mp1gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+slint = { version = "1.8", default-features = false, features = [
+    "compat-1-2",
+    "std",
+    "backend-winit",
+    "backend-linuxkms-noseat",
+    "renderer-software",
+] }
+
+[build-dependencies]
+slint-build = "1.8"
+
+# Keep build fast under QEMU emulation: optimize a bit, skip heavy LTO.
+[profile.release]
+opt-level = 2
+lto = false
+strip = true

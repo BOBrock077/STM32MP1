@@ -1,0 +1,6 @@
+target
+.git
+*.png
+*.log
+*.md
+diag.sh

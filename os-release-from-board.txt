@@ -1,0 +1,5 @@
+ID="openstlinux-weston"
+NAME="ST OpenSTLinux - Weston - (A Yocto Project Based Distro)"
+VERSION="2.6-openstlinux-20-02-19 (thud)"
+VERSION_ID="2.6-openstlinux-20-02-19"
+PRETTY_NAME="ST OpenSTLinux - Weston - (A Yocto Project Based Distro) 2.6-openstlinux-20-02-19 (thud)"
