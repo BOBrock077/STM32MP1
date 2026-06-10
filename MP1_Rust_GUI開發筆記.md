@@ -1,8 +1,8 @@
 # STM32MP1 — Rust + Slint GUI 開發筆記
 
-> 最後更新：2026-06-02
+> 最後更新：2026-06-10（新增：linuxkms 實體面板打通、USB 感測器整合、Docker 相依快取）
 > 專案目錄：`C:\Stone\AI_try\MP1\mp1gui`（PC 端）
-> 板子背景見 `MP1_知識總整理.md`
+> 板子背景見 `MP1_知識總整理.md`；USB 感測器/驅動完整鏈路見 `MP1_USB感測器與面板GUI整合筆記.md`
 
 ---
 
@@ -16,7 +16,8 @@
 | 交叉編譯成 armhf 執行檔 | ✅ 完成（Docker + QEMU + Debian buster） |
 | 傳進板子並執行 | ✅ 完成（`scp` → `/home/root/mp1gui`，10MB） |
 | 跑在 **VNC 桌面 :1**（X11，PC 可遠端看） | ✅ **已驗證可動**，顯示真實 /proc 資料 |
-| 跑在 **板子實體 DSI 面板**（linuxkms 全螢幕） | ⚠️ **計畫中**：設定已改、尚未重編驗證 |
+| 跑在 **板子實體 DSI 面板**（linuxkms 全螢幕） | ✅ **2026-06-10 打通**（`openvt -s` 拿 DRM master，見 §4b） |
+| 透過 **USB 讀外部感測器**並顯示數值 | ✅ **2026-06-10**（`SC RE` 輪詢 → Temp/Humidity/Flow，見 §4c） |
 
 ---
 
@@ -24,12 +25,13 @@
 
 ```
 mp1gui/
-├─ Cargo.toml          # 相依與 Slint features
+├─ Cargo.toml          # 相依與 Slint features（含 serialport、backend-linuxkms-noseat）
 ├─ build.rs            # 呼叫 slint_build 編譯 .slint
-├─ ui/app.slint        # GUI 版面（Slint 語言）
-├─ src/main.rs         # 讀 /proc、綁定 callback、Timer 每秒刷新
-├─ Dockerfile          # armhf(buster) 編譯環境
+├─ ui/app.slint        # GUI 版面（Slint 語言；含 Sensor(SC RE) 顯示框）
+├─ src/main.rs         # 讀 /proc + 背景 thread 輪詢 USB 感測器、Timer 每秒刷新
+├─ Dockerfile          # armhf(buster) 編譯環境（已改成相依快取結構，見 §6）
 ├─ deploy.ps1          # 從 image 取出二進位 → scp 進板子
+├─ run-panel.sh        # 用 openvt -s 把 GUI 起在實體 DSI 面板（見 §4b）
 └─ .dockerignore
 ```
 
@@ -107,23 +109,69 @@ unset WAYLAND_DISPLAY
 畫面出現在 VNC 桌面，PC 用 RealVNC 連 `100.192.0.50:5901` 看得到、可點按鈕。
 （PC 端非互動 ssh 的 PATH 很精簡，記得 `export PATH=/usr/sbin:/sbin:/usr/bin:/bin`。）
 
-### 4b. 計畫：跑在實體 DSI 面板（linuxkms 全螢幕）
-**設定已改、尚未重編驗證**（用 `git`/檔案現況為準）：
-- `Cargo.toml` features 加入 **`backend-linuxkms-noseat`**（root 直開 DRM，免 seatd），
-  繼續只用 **`renderer-software`**。
-- `Dockerfile` apt 加 **`libdrm-dev libinput-dev libudev-dev`**。
-- **絕對不要**啟用 `renderer-femtovg`：板子的 `libgbm.so` 是 Vivante 廠商版、**沒有標準 `libgbm.so.1` soname**，一旦連到 gbm，二進位在板子上會 `libgbm.so.1: cannot open shared object file` 起不來。軟體算繪走 DRM dumb buffer，不碰 gbm。
-- 執行步驟（重編完）：
-  ```sh
-  systemctl stop weston            # 釋放 DRM master（ST demo 會關掉）
-  SLINT_BACKEND=linuxkms /home/root/mp1gui
-  # 若畫面方向不對：試 SLINT_KMS_ROTATION=270（面板原生方向 vs Weston 的 transform=270）
-  ```
-- 執行時相依（板子已確認）：`libdrm.so.2`、`libinput.so.10`、`libudev.so.1`、`/dev/dri/card0` ✓。
+### 4b. ✅ 已打通：跑在實體 DSI 面板（linuxkms 全螢幕，2026-06-10）
+- `Cargo.toml` features：**`backend-linuxkms-noseat`**（root 直開 DRM，免 seatd）+ **`renderer-software`**。
+- `Dockerfile` apt 已含 **`libdrm-dev libinput-dev libudev-dev`**。執行時相依板子都有：`libdrm.so.2`、`libinput.so.10`、`libudev.so.1`、`/dev/dri/card0` ✓。
+- **絕對不要**啟用 `renderer-femtovg`：板子的 `libgbm.so` 是 Vivante 廠商版、**沒有標準 `libgbm.so.1` soname**，一旦連到 gbm 會 `cannot open shared object file` 起不來。軟體算繪走 DRM dumb buffer，不碰 gbm。（已驗證二進位沒連到 gbm，log 顯示 `Using Software renderer`。）
+
+#### ⚠️ 最大踩雷：DRM master 權限
+直接 `systemd-run` 或裸跑會：
+```
+Error presenting framebuffer on screen: Permission denied (os error 13)
+```
+原因：行程**沒掛在前景 VT** 上，拿不到 DRM master（fbcon 文字主控台佔著 CRTC）。`nohup` 跑有時剛好搶到、有時搶不到，**不可靠**。
+
+**解法照抄 weston 的做法**：weston 是透過 `weston-start` 裡的 **`openvt -s`**（配一個新前景 VT）啟動的。所以我們也用 `openvt -s`：
+
+```sh
+# mp1gui/run-panel.sh 的核心
+systemctl stop weston          # 釋放 DRM master（ST demo 會關掉）
+openvt -s -- sh -c 'SLINT_BACKEND=linuxkms exec /home/root/mp1gui >/tmp/gui.log 2>&1'
+```
+- log 出現 `Using Software renderer` / `Rendering at 480x800`、**無 permission denied** → 成功。
+- 跑在 VT 上（`ps` 看到 `ttyN ... Ssl+`），**ssh 關線不會死**（之前用 `nohup` 會被收掉）。
+- 面板原生 **480×800 直式**；若方向不對，`run-panel.sh` 加 `export SLINT_KMS_ROTATION=270`。
+- ⚠️ **VNC 看不到 linuxkms 的畫面**（Weston 5.0 無 VNC backend、linuxkms 走 DRM 不經 X）。要遠端看得改回 §4a 的 X11/VNC 模式（同一支二進位），但序列埠一次只能一個程式開。
+
+### 4c. USB 感測器整合（2026-06-10）
+GUI 透過 USB 對外部 **SGX 感測板**（FT232 → `/dev/ttyUSB0`，驅動見整合筆記）查詢數值並顯示。
+- `Cargo.toml` 加 **`serialport = "4"`**（Linux 用 libudev，板子已有）。
+- `src/main.rs` 背景 thread：
+  1. 埠優先 **`ttyUSB0`** 再 `ttyACM0`，115200 8N1，開 DTR/RTS。
+  2. 每秒 `clear(Input)` → 送 **`SC RE\r`**（CR 結尾！）→ 收回應。
+     - **bug 教訓**：一開始第一次 `read` 逾時就 break，抓不到「較慢才開始回」的回應 → 改成**等最多 2 秒讓回應開始到、收到資料後 idle 才結束**。
+  3. `parse_reply()` 專抓含 `nT1/nH1/nF1` 的行，格式化成 `Temp / Humidity / Flow` 三行；非量測行（如板號）回空字串 → GUI 保留上一筆，不閃爍。
+- `ui/app.slint`：加「Sensor (SC RE)」GroupBox（連線狀態燈 + 量測值）。
+- 除錯：serial thread `eprintln!("[serial] ...")` → 進 `/tmp/gui.log`，可看實際收到的位元組與解析結果。
+- 協定/資料格式（`nT1`=溫度、`nH1`=濕度、`nF1`=流量）與驅動細節見 `MP1_USB感測器與面板GUI整合筆記.md`。
 
 ---
 
-## 5. 踩雷速查
+## 5. Docker 建置加速（相依快取）
+
+QEMU 原生編 armhf 約 **40 分**（Slint 相依樹大）。兩個加速法：
+
+1. **Dockerfile 相依快取結構**：先用 stub crate（`fn main(){}`）只編相依層，再 COPY 真實碼編 `mp1gui`。改 `src`/`ui` 重編從 40 分降到 **1–2 分**（`Cargo.toml`/`Cargo.lock` 不變就吃快取）。**首次用新 Dockerfile 仍會慢一次**建立快取。
+   ```dockerfile
+   COPY Cargo.toml Cargo.lock ./
+   RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "fn main() {}" > build.rs \
+    && cargo build --release && rm -rf src build.rs
+   COPY . .
+   RUN cargo build --release
+   ```
+2. **容器內增量編**（迭代最快，~1 分）：進舊映像容器，只換 `src/main.rs` 重編，重用 `/src/target` 的相依快取：
+   ```powershell
+   docker run -d --name mp1edit --platform linux/arm/v7 mp1gui-build sleep infinity
+   docker cp src\main.rs mp1edit:/src/src/main.rs
+   docker exec mp1edit sh -c "cd /src && cargo build --release"
+   docker cp mp1edit:/src/target/release/mp1gui mp1gui-arm
+   docker rm -f mp1edit
+   ```
+   > scp 上板前先 `pkill -x mp1gui`，否則執行檔被佔、scp 會 **ETXTBSY**（`dest open: Failure`）。
+
+---
+
+## 6. 踩雷速查
 
 | 症狀 | 原因 / 解法 |
 |------|-------------|
@@ -136,15 +184,20 @@ unset WAYLAND_DISPLAY
 | GUI：`requested global was not found` | Weston 太舊，winit Wayland 起不來 → 改用 X11（:1）或 linuxkms |
 | GUI：`Failed to open connection to X server`（:0） | Xwayland 沒對外 socket → 用 :1 或 linuxkms |
 | `org.freedesktop.portal.Desktop` 警告 | 無害可忽略 |
-| PowerShell→ssh→板子 三層引號，grep `|` 樣式被拆壞 | 別用 `|` 交替；改 `grep -e A -e B`，或多次 grep |
+| PowerShell→ssh→板子 三層引號，grep `|` 樣式被拆壞 | 別用 `|` 交替；改 `grep -e A -e B`，或多次 grep；複雜邏輯**寫成 .sh scp 到板子跑** |
+| linuxkms：`Error presenting framebuffer: Permission denied` | 沒掛前景 VT、拿不到 DRM master → 用 **`openvt -s`** 起（見 §4b） |
+| GUI 跑一下就消失（`nohup` 啟動） | ssh 關線把它收掉 → 改用 `openvt -s`（掛 VT，不死） |
+| serial 永遠 `no reply` 但埠有開（fd 有 ttyUSB0） | read 第一次逾時就 break、抓不到慢回應 → 等 ~2 秒讓回應開始到再收（見 §4c） |
+| scp 上板 `dest open: Failure`（ETXTBSY） | 舊 mp1gui 還在跑、執行檔被佔 → 先 `pkill -x mp1gui` 再 scp |
 
 ---
 
-## 6. 待辦 / 下一步
+## 7. 待辦 / 下一步
 
-- [ ] 重編 linuxkms 版並在實體 DSI 面板驗證（第 4b 節）；處理畫面旋轉。
-- [ ] 確認重編後二進位 **沒有**連到 `libgbm.so.1`（`ldd` 或 readelf 檢查）。
-- [ ] 觸控輸入測試（libinput / `/dev/input`）。
+- [x] ~~重編 linuxkms 版並在實體 DSI 面板驗證~~ → **2026-06-10 完成**（`openvt -s`，§4b）。
+- [x] ~~確認二進位沒連到 `libgbm.so.1`~~ → log 顯示 `Using Software renderer`，未連 gbm。
+- [ ] 畫面**旋轉**確認（若方向不對加 `SLINT_KMS_ROTATION=270`）。
+- [ ] **觸控輸入**測試（linuxkms 已開 `/dev/input/event0/1`，libinput 觸控未測）。
+- [ ] **開機自動啟動**（systemd service 包 `openvt -s` 起 GUI）；FTDI 驅動也要開機自動 `insmod`。
 - [ ] 之後可換 femtovg(GPU) 提升效能 —— 但需先解決板子無標準 libgbm.so.1 的問題。
-- [ ] 開機自動啟動（systemd service）。
 ```

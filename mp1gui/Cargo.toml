@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Read measurement values from a USB-serial device (CDC-ACM/FTDI) at 115200 8N1.
+# Linux backend uses libudev -> board already ships libudev.so.1.
+serialport = "4"
 slint = { version = "1.8", default-features = false, features = [
     "compat-1-2",
     "std",

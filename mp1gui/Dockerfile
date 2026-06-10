@@ -25,5 +25,21 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --profile minimal --default-toolchain stable
 
 WORKDIR /src
+
+# --- Dependency cache layer ---------------------------------------------
+# Build a stub crate from just the manifests so the heavy slint/winit/...
+# dependency tree (hundreds of crates) compiles ONCE and stays cached.
+# This layer is invalidated only when Cargo.toml / Cargo.lock change, so
+# editing src/ or ui/ no longer triggers a full rebuild -- cuts QEMU rebuilds
+# from ~30 min down to ~1-2 min.
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src \
+ && echo "fn main() {}" > src/main.rs \
+ && echo "fn main() {}" > build.rs \
+ && cargo build --release \
+ && rm -rf src build.rs
+
+# --- Application layer ---------------------------------------------------
+# Real sources; only the mp1gui crate itself recompiles, deps come from cache.
 COPY . .
 RUN cargo build --release && ls -l /src/target/release/mp1gui

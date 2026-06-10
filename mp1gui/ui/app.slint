@@ -13,6 +13,10 @@ export component MainWindow inherits Window {
     in-out property <int> counter: 0;
     callback inc();
 
+    in property <string> dev_value: "-";
+    in property <string> dev_raw: "-";
+    in property <bool> dev_connected: false;
+
     VerticalBox {
         padding: 14px;
         spacing: 8px;
@@ -38,6 +42,24 @@ export component MainWindow inherits Window {
                 Text { text: "Uptime : " + root.uptime; color: #ffffff; font-size: 16px; }
                 Text { text: "Memory : " + root.mem; color: #ffffff; font-size: 16px; }
                 Text { text: "Load   : " + root.load; color: #ffffff; font-size: 16px; }
+            }
+        }
+
+        GroupBox {
+            title: "Sensor  (SC RE)";
+            VerticalBox {
+                spacing: 4px;
+                Text {
+                    text: root.dev_connected ? "● connected" : "○ waiting...";
+                    color: root.dev_connected ? #6ee7b7 : #f87171;
+                    font-size: 16px;
+                }
+                Text {
+                    text: root.dev_value == "" ? "(no reply yet)" : root.dev_value;
+                    color: #ffffff;
+                    font-size: 20px;
+                    wrap: word-wrap;
+                }
             }
         }
 

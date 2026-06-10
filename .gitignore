@@ -10,6 +10,9 @@ mp1gui/target/
 mp1gui/mp1gui-arm
 mp1gui/build.log
 
+# --- 交叉編出的核心模組（可由 ftdi-mod/Dockerfile + board.config 重建）---
+ftdi-mod/*.ko
+
 # --- Claude Code 本機設定 ---
 .claude/
 
